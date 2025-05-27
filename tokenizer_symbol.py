@@ -1,0 +1,13 @@
+from collections import defaultdict
+
+PAD_TOKEN = "<pad>"
+BOS_TOKEN = "<s>"
+EOS_TOKEN = "</s>"
+UNK_TOKEN = "<unk>"
+
+STANDERLIZE_TOKEN = defaultdict(lambda: UNK_TOKEN)
+STANDERLIZE_TOKEN["[SOS]"] = BOS_TOKEN
+STANDERLIZE_TOKEN["[EOS]"] = EOS_TOKEN
+STANDERLIZE_TOKEN["[PAD]"] = PAD_TOKEN
+STANDERLIZE_TOKEN["[UNK]"] = UNK_TOKEN   
+

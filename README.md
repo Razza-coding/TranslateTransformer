@@ -1,3 +1,5 @@
-This is a Transformer model learning project proved from https://www.youtube.com/watch?v=ISNdQcPhsts&t=125s
+This is a Transformer model learning project.
 
-Initial project recreate the sample code, and then transform the task target from EN-IT to EN-CH dataset
+Initial project code by https://www.youtube.com/watch?v=ISNdQcPhsts as sample code, Thank you for providing.
+
+This project will transform task target from EN-IT to EN-CH translation

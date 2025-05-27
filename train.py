@@ -1,29 +1,23 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
-
 from torch.utils.tensorboard import SummaryWriter
 
-from model import build_transformer
-from dataset import BilingualDataset, causal_mask
-
-from config import get_config, get_weight_folder, get_weight_file_path, get_latest_weight_filepath
-
-from datasets import load_dataset
 from tokenizers import Tokenizer
-from tokenizers.models import WordLevel
-from tokenizers.trainers import WordLevelTrainer
-from tokenizers.pre_tokenizers import Whitespace
 import torchmetrics
 
 from pathlib import Path
 from tqdm import tqdm
-
 import warnings
 
+from model import build_transformer
+from dataset import BilingualDataset, causal_mask, get_ds
+from config import get_config, get_weight_folder, get_weight_file_path, get_latest_weight_filepath
+from tokenizer_symbol import *
+
 def greedy_decode(model, source, source_mask, tokenizer_src: Tokenizer, tokenizer_tgt: Tokenizer, max_len, device):
-    sos_idx = tokenizer_tgt.token_to_id('[SOS]')
-    eos_idx = tokenizer_tgt.token_to_id('[EOS]')
+    sos_idx = tokenizer_tgt.token_to_id(BOS_TOKEN)
+    eos_idx = tokenizer_tgt.token_to_id(EOS_TOKEN)
 
     # Precompute encoder output and reuse it every iteration of decoding
     encoder_output = model.encode(source, source_mask)
@@ -74,7 +68,11 @@ def run_validation(model, validation_ds, tokenizer_src: Tokenizer, tokenizer_tgt
 
             source_text = batch['src_text'][0]
             target_text = batch['tgt_text'][0]
-            model_out_text = tokenizer_tgt.decode(model_output.detach().cpu().numpy())
+            output_ids  = model_output.detach().cpu().numpy()
+            model_out_text = tokenizer_tgt.decode(output_ids, skip_special_tokens=True)
+
+            label   = batch['label'][0]
+            label_decoded   = tokenizer_tgt.decode(label, skip_special_tokens=True)
 
             source_texts.append(source_text)
             expected.append(target_text)
@@ -85,6 +83,11 @@ def run_validation(model, validation_ds, tokenizer_src: Tokenizer, tokenizer_tgt
             print_msg(f"{f'SOURCE: ':>12}{source_text}")
             print_msg(f"{f'TARGET: ':>12}{target_text}")
             print_msg(f"{f'PREDICTED: ':>12}{model_out_text}")
+
+            #print_msg(f"{f'SOURCE ENCODED: ':>20}{encoder_input}")
+            #print_msg(f"{f'TARGET ENCODED: ':>20}{decoder_input}")
+            print_msg(f"{f'PREDICTED ENCODED: ':>20}{output_ids}")
+            print_msg(f"{f'EXPECTED TEXT: ':>20}{label_decoded}")
 
             if count == num_examples:
                 print_msg('-'*console_width)
@@ -110,63 +113,6 @@ def run_validation(model, validation_ds, tokenizer_src: Tokenizer, tokenizer_tgt
         writer.add_scalar('validation BLEU', bleu, global_step)
         writer.flush()
         pass
-
-
-def get_all_sentences(ds, lang):
-    for item in ds:
-        yield item['translation'][lang]
-
-def get_or_build_tokenizer(config, ds, lang):
-    tokenizer_path = Path(config['tokenizer_file'].format(lang))
-    if not Path.exists(tokenizer_path):
-        # Create a word level tokenizer
-        # Whitespace as seperater, and one word per token
-        # Replace word can not find in vocabulary as [UNK]
-        # [SOS] [EOS] start and end of sentence
-        # [PAD] fill up sentence to reach fixed input length in training stage
-        # Minimum Frequency is 2, word must appear 2 times before adding in vocabulary
-        tokenizer = Tokenizer(WordLevel(unk_token='[UNK]')) # unknown
-        tokenizer.pre_tokenizer = Whitespace()
-        trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "[SOS]", "[EOS]"], min_requency=2)
-        # Get item from dataset, train tokenizer
-        tokenizer.train_from_iterator(get_all_sentences(ds, lang), trainer=trainer)
-        tokenizer.save(str(tokenizer_path))
-    else:
-        tokenizer = Tokenizer.from_file(str(tokenizer_path))
-    return tokenizer
-
-def get_ds(config):
-    # Download dataset form hugging face
-    ds_raw = load_dataset(config["datasource"], f'{config["lang_src"]}-{config["lang_tgt"]}', split='train')
-
-    # Build tokenizers
-    tokenizer_src = get_or_build_tokenizer(config, ds_raw, config['lang_src'])
-    tokenizer_tgt = get_or_build_tokenizer(config, ds_raw, config['lang_tgt'])
-
-    # 90% train 10% validation
-    train_ds_size = int(0.9 * len(ds_raw))
-    val_ds_size = len(ds_raw) - train_ds_size
-    train_ds_raw, val_ds_raw = random_split(ds_raw, [train_ds_size, val_ds_size])
-
-    train_ds = BilingualDataset(train_ds_raw, tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
-    val_ds   = BilingualDataset(val_ds_raw,   tokenizer_src, tokenizer_tgt, config['lang_src'], config['lang_tgt'], config['seq_len'])
-
-    max_len_src = 0
-    max_len_tgt = 0
-
-    for item in ds_raw:
-        src_ids = tokenizer_src.encode(item['translation'][config['lang_src']]).ids
-        tgt_ids = tokenizer_tgt.encode(item['translation'][config['lang_tgt']]).ids
-        max_len_src = max(max_len_src, len(src_ids))
-        max_len_tgt = max(max_len_tgt, len(tgt_ids))
-
-    print(r"Max Src Len: {}", max_len_src)
-    print(r"Max Tgt Len: {}", max_len_tgt)
-
-    train_dataloader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True)
-    val_dataloader   = DataLoader(val_ds, batch_size=1, shuffle=True)
-
-    return train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt
 
 # Build a transformer according to the size of input
 def get_model(config, vocab_src_len, vocab_tgt_len):
@@ -196,20 +142,20 @@ def train_model(config):
     if preload_model_path:
         print(f'Preloading model: {preload_model_path}')
         state = torch.load(preload_model_path)
+        model.load_state_dict(state_dict=state['model_state_dict'])
         initial_epoch = state['epoch'] + 1
         optimizer.load_state_dict(state['optimizer_state_dict'])
         global_step = state['global_step']
     else:
         print("No preload model set, starting from epoch 0")
     
-    loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer_src.token_to_id('[PAD]'), label_smoothing=0.1).to(device)
+    loss_fn = nn.CrossEntropyLoss(ignore_index=tokenizer_src.token_to_id(PAD_TOKEN), label_smoothing=0.1).to(device)
 
     for epoch in range(initial_epoch, config['num_epoch']):
         torch.cuda.empty_cache()
+        model.train()
         batch_iterator = tqdm(train_dataloader, desc=f'Processing epoch {epoch: 02d}')
         for batch in batch_iterator:
-            model.train()
-            
             encoder_input = batch['encoder_input'].to(device) # (B, Seq_Len)
             decoder_input = batch['decoder_input'].to(device) # (B, Seq_Len)
             encoder_mask = batch['encoder_mask'].to(device) # (B, 1, 1, Seq_Len)
@@ -233,16 +179,23 @@ def train_model(config):
             # Backpropagate the loss
             loss.backward()
 
+            # gradient clipping 
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             # Update the weight
             optimizer.step()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
-            # Execute validation
+            # free memory
+            del loss, proj_output, decoder_output, encoder_output
+            torch.cuda.empty_cache()
 
             global_step += 1
+            
         
         # Validation every epoch
-        run_validation(model, val_dataloader, tokenizer_src, tokenizer_tgt, config['seq_len'], device, lambda msg: batch_iterator.write(msg), global_step, writer)
+        with torch.no_grad():
+            run_validation(model, val_dataloader, tokenizer_src, tokenizer_tgt, config['seq_len'], device, lambda msg: batch_iterator.write(msg), global_step, writer)
         
         # Save the model at the end of every epoch
         model_filename = get_weight_file_path(config, f'{epoch:02d}')

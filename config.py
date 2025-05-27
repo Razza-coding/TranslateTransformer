@@ -3,18 +3,21 @@ import os
 
 def get_config():
     return {
-        "batch_size": 8,
-        "num_epoch": 30,
+        "batch_size": 4,
+        "num_epoch": 100,
         "lr": 10**-4,
-        "seq_len": 350,
-        "d_model": 512,
-        "datasource": "opus_books",
+        "seq_len": 300,
+        "d_model": 256,
+        "datasource": "yezhengli9/wmt20-en-zh",
         "lang_src": "en",
-        "lang_tgt": "it",
+        "lang_tgt": "zh",
+        "preload": "latest",
         "model_folder": "weights",
         "model_basename": "tmodel_",
-        "preload": "latest",
-        "tokenizer_file": "tokenizer_{0}.json",
+        "tokenizer":{
+            "use_common_tokenizer" : "bert-base-uncased",
+            "tokenizer_file": "tokenizer/{0}/tokenizer_{1}.json"
+        },
         "experiment_name": "runs/tmodel"
     }
 
