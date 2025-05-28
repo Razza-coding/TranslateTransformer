@@ -4,19 +4,20 @@ import os
 def get_config():
     return {
         "batch_size": 4,
-        "num_epoch": 100,
+        "num_epoch": 50,
+        "save_every_n_epoch": 10,
         "lr": 10**-4,
         "seq_len": 300,
         "d_model": 256,
         "datasource": "yezhengli9/wmt20-en-zh",
         "lang_src": "en",
         "lang_tgt": "zh",
-        "preload": "latest",
+        "preload": "50",
         "model_folder": "weights",
         "model_basename": "tmodel_",
         "tokenizer":{
-            "use_common_tokenizer" : "bert-base-uncased",
-            "tokenizer_file": "tokenizer/{0}/tokenizer_{1}.json"
+            "use_common_tokenizer" : "facebook/mbart-large-50-many-to-many-mmt",
+            "tokenizer_file": "tokenizer/{0}"
         },
         "experiment_name": "runs/tmodel"
     }

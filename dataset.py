@@ -29,9 +29,9 @@ class BilingualDataset(Dataset):
         self.tgt_lang = tgt_lang
         self.seq_len  = seq_len
 
-        self.sos_token = torch.tensor([tokenizer_tgt.token_to_id(BOS_TOKEN)], dtype=torch.int64)
-        self.eos_token = torch.tensor([tokenizer_tgt.token_to_id(EOS_TOKEN)], dtype=torch.int64)
-        self.pad_token = torch.tensor([tokenizer_tgt.token_to_id(PAD_TOKEN)], dtype=torch.int64)
+        self.sos_token = torch.tensor([tokenizer_tgt.convert_tokens_to_ids(BOS_TOKEN)], dtype=torch.int64)
+        self.eos_token = torch.tensor([tokenizer_tgt.convert_tokens_to_ids(EOS_TOKEN)], dtype=torch.int64)
+        self.pad_token = torch.tensor([tokenizer_tgt.convert_tokens_to_ids(PAD_TOKEN)], dtype=torch.int64)
 
     def __len__(self):
         return len(self.ds)
@@ -104,41 +104,76 @@ def causal_mask(size):
     mask = torch.triu( torch.ones(1, size, size), diagonal=1 ).type(torch.int)
     return mask == 0
 
-def get_or_build_tokenizer(config, ds, lang):
+def get_mbart_lang(lang: str) -> str:
+    mbart_lang_code_map = {
+    "af": "af_ZA",
+    "ar": "ar_AR",
+    "az": "az_AZ",
+    "bn": "bn_IN",
+    "cs": "cs_CZ",
+    "de": "de_DE",
+    "en": "en_XX",
+    "es": "es_XX",
+    "et": "et_EE",
+    "fa": "fa_IR",
+    "fi": "fi_FI",
+    "fr": "fr_XX",
+    "gl": "gl_ES",
+    "gu": "gu_IN",
+    "he": "he_IL",
+    "hi": "hi_IN",
+    "hr": "hr_HR",
+    "id": "id_ID",
+    "it": "it_IT",
+    "ja": "ja_XX",
+    "ka": "ka_GE",
+    "kk": "kk_KZ",
+    "km": "km_KH",
+    "ko": "ko_KR",
+    "lt": "lt_LT",
+    "lv": "lv_LV",
+    "mk": "mk_MK",
+    "ml": "ml_IN",
+    "mn": "mn_MN",
+    "mr": "mr_IN",
+    "ne": "ne_NP",
+    "nl": "nl_XX",
+    "pl": "pl_PL",
+    "ps": "ps_AF",
+    "pt": "pt_XX",
+    "ro": "ro_RO",
+    "ru": "ru_RU",
+    "si": "si_LK",
+    "sk": "sk_SK",
+    "sl": "sl_SI",
+    "sq": "sq_AL",
+    "sv": "sv_SE",
+    "ta": "ta_IN",
+    "te": "te_IN",
+    "th": "th_TH",
+    "tr": "tr_TR",
+    "uk": "uk_UA",
+    "ur": "ur_PK",
+    "vi": "vi_VN",
+    "xh": "xh_ZA",
+    "zh": "zh_CN",
+    }
+    if lang in mbart_lang_code_map.keys():
+        return mbart_lang_code_map[lang]
+    return lang
+
+def get_or_build_tokenizer(config):
     sub_folder = "{0}-{1}".format(config['lang_src'], config['lang_tgt'])
-    tokenizer_path = Path(config['tokenizer']['tokenizer_file'].format(sub_folder, lang))
+    tokenizer_path = Path(config['tokenizer']['tokenizer_file'].format(sub_folder))
     
-    if config['tokenizer']['use_common_tokenizer'] is not None:
+    if Path.exists(tokenizer_path):
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    elif config['tokenizer']['use_common_tokenizer'] is not None:
         # use a common pretrained tokenizer           
-        tokenizer = AutoTokenizer.from_pretrained("facebook/mbart-large-50-many-to-many-mmt")           
-        tokenizer.src_lang = "en_XX"
-        tokenizer.tgt_lang = "zh_CN"
-
-        # link to function
-        tokenizer.token_to_id = tokenizer.convert_tokens_to_ids
-        tokenizer.get_vocab_size = lambda: tokenizer.vocab_size
-
-        tokenizer.save_pretrained(str(tokenizer_path))
-    elif not Path.exists(tokenizer_path):
-        tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
-        # Create a word level tokenizer
-        # build tokenizer ourself
-        # Whitespace as seperater, and one word per token
-        # Replace word can not find in vocabulary as [UNK]
-        # [SOS] [EOS] start and end of sentence
-        # [PAD] fill up sentence to reach fixed input length in training stage
-        # Minimum Frequency is 2, word must appear 2 times before adding in vocabulary
-        tokenizer = Tokenizer(WordLevel(unk_token=UNK_TOKEN)) # unknown
-        tokenizer.pre_tokenizer = Whitespace()
-        trainer = WordLevelTrainer(special_tokens=[UNK_TOKEN, PAD_TOKEN, BOS_TOKEN, EOS_TOKEN], min_requency=2)
-        # Make generator
-        def get_all_sentences(ds, lang):
-            for item in ds:
-                yield item['translation'][lang]
-        # Get item from dataset, train tokenizer
-        tokenizer.train_from_iterator(get_all_sentences(ds, lang), trainer=trainer)
-        # save tokenizer
-        tokenizer.save(str(tokenizer_path))
+        tokenizer = AutoTokenizer.from_pretrained(config['tokenizer']['use_common_tokenizer'])
+        tokenizer.src_lang = get_mbart_lang(config['lang_src'])
+        tokenizer.tgt_lang = get_mbart_lang(config['lang_tgt'])
+        tokenizer.save_pretrained(str(tokenizer_path)) 
     else:
         tokenizer = Tokenizer.from_file(str(tokenizer_path))
     
@@ -224,8 +259,7 @@ def get_ds(config):
     preview_raw_dataset(ds_raw, 5)
 
     # Build tokenizers
-    tokenizer_src = get_or_build_tokenizer(config, ds_raw, config['lang_src'])
-    tokenizer_tgt = get_or_build_tokenizer(config, ds_raw, config['lang_tgt'])
+    tokenizer_src = tokenizer_tgt = get_or_build_tokenizer(config)
 
     # 90% train 10% validation
     train_ds_size = int(0.9 * len(ds_raw))
@@ -244,8 +278,8 @@ def get_ds(config):
         max_len_src = max(max_len_src, len(src_ids))
         max_len_tgt = max(max_len_tgt, len(tgt_ids))
 
-    print(r"Max Src Len: {}", max_len_src)
-    print(r"Max Tgt Len: {}", max_len_tgt)
+    print(f"Max Src Len: {max_len_src}")
+    print(f"Max Tgt Len: {max_len_tgt}")
 
     train_dataloader = DataLoader(train_ds, batch_size=config['batch_size'], shuffle=True)
     val_dataloader   = DataLoader(val_ds, batch_size=1, shuffle=True)
@@ -253,8 +287,8 @@ def get_ds(config):
     return train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt
 
 if __name__ == "__main__":
-    device = 'cpu'
     config = get_config()
+    device = 'cpu'
     train_dataloader, val_dataloader, tokenizer_src, tokenizer_tgt = get_ds(config)
 
     for idx, batch in enumerate(train_dataloader):
