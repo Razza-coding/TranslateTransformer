@@ -5,14 +5,14 @@ def get_config():
     return {
         "batch_size": 4,
         "num_epoch": 50,
-        "save_every_n_epoch": 10,
+        "save_every_n_epoch": 1,
         "lr": 10**-4,
         "seq_len": 300,
         "d_model": 256,
-        "datasource": "yezhengli9/wmt20-en-zh",
+        "datasource": "zetavg/coct-en-zh-tw-translations-twp-300k",
         "lang_src": "en",
-        "lang_tgt": "zh",
-        "preload": "50",
+        "lang_tgt": "ch",
+        "preload": "latest",
         "model_folder": "weights",
         "model_basename": "tmodel_",
         "tokenizer":{

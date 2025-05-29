@@ -105,6 +105,8 @@ def causal_mask(size):
     return mask == 0
 
 def get_mbart_lang(lang: str) -> str:
+    if lang == 'ch':
+        lang = 'zh'
     mbart_lang_code_map = {
     "af": "af_ZA",
     "ar": "ar_AR",
@@ -158,9 +160,8 @@ def get_mbart_lang(lang: str) -> str:
     "xh": "xh_ZA",
     "zh": "zh_CN",
     }
-    if lang in mbart_lang_code_map.keys():
-        return mbart_lang_code_map[lang]
-    return lang
+    assert lang in mbart_lang_code_map.keys(), "Not included in tokenizer"
+    return mbart_lang_code_map[lang]
 
 def get_or_build_tokenizer(config):
     sub_folder = "{0}-{1}".format(config['lang_src'], config['lang_tgt'])
@@ -239,6 +240,22 @@ def load_wmt20_en_zh(config):
         
     return format_dataset
 
+def load_zetavg(config):
+    ds = load_dataset(config["datasource"], split="train")
+    format_dataset = []
+    for idx, item in enumerate(ds):
+        id = idx
+        lang_k = list(item.keys())
+        lang_d = {
+            lang_k[0] : item[lang_k[0]],
+            lang_k[1] : item[lang_k[1]]
+        }
+        format_dataset.append({
+            'id': id,
+            'translation': lang_d
+        })
+    return format_dataset
+
 def get_ds(config):
     '''
     Make Dataset Loader and Tokenizer
@@ -250,6 +267,8 @@ def get_ds(config):
         ds_raw = load_LLaMAX_Ted(config)
     elif 'yezhengli9/wmt20-en-zh' == config["datasource"]:
         ds_raw = load_wmt20_en_zh(config)
+    elif 'zetavg/coct-en-zh-tw-translations-twp-300k' == config["datasource"]:
+        ds_raw = load_zetavg(config)
     else:
         ds_raw = None
     
